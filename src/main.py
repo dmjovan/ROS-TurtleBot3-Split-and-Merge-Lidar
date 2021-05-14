@@ -12,44 +12,61 @@ from sensor_msgs.msg import LaserScan
 from std_msgs.msg import String
 
 # Promenljiva za cuvanje tacaka
-points = [[3.199741196401497, -0.9201893218574223, 3.329428195953369, 6.003159357234836], [3.209520408092776, -0.8624816133408421, 3.3233861923217773, 6.020661279559135], [3.2120279310801085, -0.803155242932764, 3.3109185695648193, 6.038163201883435], [3.19368266731298, -0.7394304947107166, 3.278165102005005, 6.055665124207735], [3.2075711882244935, -0.6837307970781504, 3.2796342372894287, 6.073167046532035], [3.1933008747034655, -0.6224717885569702, 3.2534046173095703, 6.090668968856335], [3.1922457915664992, -0.5644640221004115, 3.241766929626465, 6.1081708911806345], [3.2058137130746247, -0.5091735906833983, 3.245997428894043, 6.125672813504934], [3.1894809286953114, -0.44950208329292163, 3.2209999561309814, 6.143174735829234], [3.2055024022010628, -0.3946782393944295, 3.229708433151245, 6.160676658153534], [3.212404331304098, -0.3385693812902584, 3.230196714401245, 6.178178580477834], [3.2085770381946506, -0.2814847244382805, 3.220900535583496, 6.195680502802134], [3.1892037025053432, -0.223618844207031, 3.1970338821411133, 6.213182425126433], [3.189502936145173, -0.16760598714111957, 3.193903684616089, 6.230684347450733], [3.2111748927019046, -0.11243394193261609, 3.2131426334381104, 6.248186269775033], [3.198276594429586, -0.05596632509328222, 3.1987662315368652, 6.265688192099333], [3.1942358016598686, 1.5355471039630377e-05, 3.1942358016967773, 6.283190114423633]]
+points = []
 
 # Promenljiva za indikaciju zapocetog algoritma kako ne bi dolazilo do preklapanja 
 started_algorithm = False
 
 # Funkcija za rekurzivni Split and Merge algoritam
-def split_and_merge_recursive(points, threshold_split = 0.2, threshold_merge = 0.1):
+def split_and_merge_recursive(points, threshold_split = 0.1, threshold_merge = 0.1):
+
+    result = []
 
     # Split deo 
-    line_parametars_and_points = split(points, threshold_split)
+    line_parameters_with_points = split(points, threshold_split, True)
 
     # Merge deo 
-    while True:
-        final_line_parametars, merge_result = merge(line_parametars_and_points, threshold_merge)
 
-        if merge_result == False:
-            break
+    merge_result, none_merged = merge(line_parameters_with_points, threshold_merge)
 
-    return final_line_parametars
+    while none_merged != False:
+        merge_result, none_merged = merge(merge_result, threshold_merge)
+    
+    for line_segment in merge_result:
+        result.append([line_segment[0], line_segment[1]])
 
-def merge(line_parametars_and_points, threshold_merge, abs_angle_tolerancy = 3*pi/180):
+    return result
 
-    merged = []
+# Funkcija za merge-ovanje tacaka koje potencijalno pripadaju
+# jednoj istoj liniji 
+def merge(line_parameters_with_points, threshold_merge, abs_angle_tolerancy = 3*pi/180):
 
-    cnt_not_merged = 0
+    result = []
 
-    if len(line_parametars_and_points) == 1:
-        merged = [line_parametars_and_points[0][0], line_parametars_and_points[0][1]]
+    isMerged = False
+    lastMerged = False
 
-        return merged, False
+    num_segments = len(line_parameters_with_points)
 
-    for i in range(1, len(line_parametars_and_points)):
+    if num_segments == 1:
 
-        r1 = line_parametars_and_points[i-1][0] 
-        alpha1 = line_parametars_and_points[i-1][1]
+        result = line_parameters_with_points
+        return result, False
 
-        r2 = line_parametars_and_points[i][0] 
-        alpha2 = line_parametars_and_points[i][1] 
+    for i in range(1, num_segments):
+
+        if lastMerged:
+            r1 = result[-1][0]
+            alpha1 = result[-1][1]
+            points_1 = result[-1][2]
+        else:
+            r1 = line_parameters_with_points[i-1][0] 
+            alpha1 = line_parameters_with_points[i-1][1]
+            points_1 = line_parameters_with_points[i-1][2]
+
+        r2 = line_parameters_with_points[i][0] 
+        alpha2 = line_parameters_with_points[i][1] 
+        points_2 = line_parameters_with_points[i][2]
 
         # Provera kolineranosti 
         if np.abs(alpha1 - alpha2) <= abs_angle_tolerancy :
@@ -60,43 +77,117 @@ def merge(line_parametars_and_points, threshold_merge, abs_angle_tolerancy = 3*p
             alpha_avg = (alpha1 + alpha2)/2
 
             # Pronalazenje najudaljenije tacke 
-            max_distance = 0
 
-            points_1 = line_parametars_and_points[i-1][2]
-            points_2 = line_parametars_and_points[i][2]
-
-            for i in range(len(points_1)):
-                if np.abs(r_avg - points_1[i][2]) > max_distance:
-                    max_distance = points_1[i][2]
-
-            for i in range(len(points_2)):
-                if np.abs(r_avg - points_2[i][2]) > max_distance:
-                    max_distance = points_2[i][2]
+            _, max_distance_1 = find_max_distant_point(points_1, r_avg, alpha_avg)
+            _, max_distance_2 = find_max_distant_point(points_2, r_avg, alpha_avg)
 
             # Ukoliko su dve linije bliske jedna drugoj, merge-uju se
-            if max_distance <= threshold_merge:
-                merged.append([r_avg, alpha_avg, points_1 + points_2])
+            if max(max_distance_1, max_distance_2) <= threshold_merge:
+                if lastMerged:
+                    result[-1][0] = r_avg
+                    result[-1][1] = alpha_avg
+                    result[-1][2] += points_2
+                else:
+                    result.append([r_avg, alpha_avg, points_1 + points_2])
+                
+                isMerged = True
+                lastMerged = True
 
             else:
-                cnt_not_merged += 1
-                merged.append(line_parametars_and_points[i-1])
-                merged.append(line_parametars_and_points[i])
+                result.append(line_parameters_with_points[i-1])
+                lastMerged = False
 
         else:
-            cnt_not_merged += 1
-            merged.append(line_parametars_and_points[i-1])
-            merged.append(line_parametars_and_points[i])
+            result.append(line_parameters_with_points[i-1])
+            lastMerged = False
 
-    if cnt_not_merged == len(line_parametars_and_points):
-        return merged, False
+    if not lastMerged:
+        result.append(line_parameters_with_points[-1])
 
-    return merged, True
+    return result, isMerged
 
-def split(points, threshold_split):
+# Funkcija za splitovanje podataka, ondosno tacaka 
+# na one koje pripadaju linijama posebnim
+def split(points, threshold_split, first_split = False):
 
-    line_parametars_and_points = []
+    line_parameters_with_points = []
+
+    num_points = len(points)
 
     # Fitovanje linije na celom trenutnom setu tacaka
+    [r, alpha] = fit_line(points)
+
+    # Pronalazenje najudaljenije tacke 
+    most_distant_point_index, max_distance = find_max_distant_point(points, r, alpha)
+
+    # if first_split == True:
+    # Ponovno splitovanje
+    if max_distance > threshold_split and most_distant_point_index not in [0, num_points-1]:
+
+        left_points = points[0:most_distant_point_index] 
+        right_points = points[most_distant_point_index:]
+
+        if(left_points):
+            left = split(left_points, threshold_split)
+            for item in left:
+                line_parameters_with_points.append(item)
+
+        if(right_points):
+            right = split(right_points, threshold_split)
+            for item in right:
+                line_parameters_with_points.append(item)
+
+    else:
+        
+        line_parameters_with_points.append([r, alpha, points])
+
+    return line_parameters_with_points
+
+# Funkcija za pronalazenje najudaljenije tacke od trenutne
+# fitovane linije
+def find_max_distant_point(points, r, alpha):
+
+    if alpha < 0:
+        alpha = 2*pi + alpha 
+
+    x1 = r*math.cos(alpha)
+    y1 = r*math.sin(alpha)
+
+    if alpha == 0 or alpha == pi:
+        x2 = x1
+        y2 = y1 + 0.1
+    elif alpha == pi/2 or alpha == 3*pi/2:
+        x2 = x1 + 0.1
+        y2 = y1
+    else:
+        k = math.tan(pi/2 + alpha)
+        n = r/math.sin(alpha)
+
+        x2 = x1 + 0.1
+        y2 = k*x2 + n
+
+    num_points = len(points)
+    # print(num_points)
+
+    # Pronalazenje najudaljenije tacke 
+    max_distance = -1
+
+    for i in range(num_points):
+        x0 = points[i][0]
+        y0 = points[i][1]
+
+        distance = np.abs((x2-x1)*(y1-y0) - (x1-x0)*(y2-y1))/np.sqrt((x2-x1)**2 + (y2-y1)**2)
+
+        if distance > max_distance:
+            max_distance = distance
+            most_distant_point_index = i
+
+    return most_distant_point_index, max_distance
+
+# Funkcija za odredjivanja parametara fitovane linije
+# nad prosledjenim skupom tacaka
+def fit_line(points):
+
     xc = np.mean(np.array(points)[:,0])
     yc = np.mean(np.array(points)[:,1])
 
@@ -104,32 +195,14 @@ def split(points, threshold_split):
     y_cent = yc - np.array(points)[:,1]
 
     sum_1 = np.sum(x_cent*y_cent)
+
     sum_2 = np.sum(y_cent**2 - x_cent**2)
 
     alpha = 1/2 * math.atan2(-2*sum_1, sum_2)
     r = xc*math.cos(alpha) + yc*math.sin(alpha)
 
-    # Pronalazenje najudaljenije tacke 
-    max_distance = 0
+    return [r, alpha]
 
-    for i in range(len(points)):
-        if np.abs(r - points[i][2]) > max_distance:
-            max_distance = points[i][2]
-            most_distant_point_index = i
-
-    # Ponovno splitovanje
-    if np.abs(r - points[most_distant_point_index][2]) > threshold_split:
-        left_points = points[0:most_distant_point_index+1] 
-        right_points = points[most_distant_point_index+1:]
-
-        split(left_points, threshold_split)
-        split(right_points, threshold_split)
-    else:
-        line_parametars_and_points.append([r, alpha, points])
-
-    return line_parametars_and_points
-
-    
 # Funkcija za citanje podataka sa lidara
 def lidar_callback(lidar_data):
 
@@ -137,8 +210,15 @@ def lidar_callback(lidar_data):
 
     if started_algorithm == False:
 
+        points = []
+
         for i in range(len(lidar_data.ranges)):
+
             theta = lidar_data.angle_min + i*lidar_data.angle_increment
+
+            if theta > 2*pi :
+                theta = 2*pi
+
             rho = lidar_data.ranges[i]
 
             if rho != math.inf:
@@ -158,7 +238,7 @@ def start_algorithm_callback(data):
 
         start = time.time()
 
-        line_parametars = split_and_merge_recursive(points)
+        line_parameters = split_and_merge_recursive(points)
 
         end = time.time()
 
@@ -167,9 +247,8 @@ def start_algorithm_callback(data):
         started_algorithm = False
 
         print('\nParametri detektovanih linija su: \n')
-        print(line_parametars)
+        print(line_parameters)
         print('\nVreme izvrsavanja rekurzivnog S&M algoritma je ' + str(time_diff) + ' s')
-
 
 # Funkcija za subscribe-ovanje na sve potrebne topic-e 
 def listener():
