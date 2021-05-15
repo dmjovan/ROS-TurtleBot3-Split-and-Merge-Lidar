@@ -10,17 +10,12 @@ from math import pi
 # Importovanje potrebnih struktura poruka
 from std_msgs.msg import String
 from geometry_msgs.msg import Point
+from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 
-rospy.init_node('Ekstrakcija linija')
-pub_rviz = rospy.Publisher('visualization_msgs/MarkerArray', Marker, queue_size=0)
-
-# Promenljiva za cuvanje tacaka
-points = []
-
-# Promenljiva za indikaciju zapocetog algoritma kako ne bi dolazilo do preklapanja 
-started_algorithm = False
+# # Promenljiva za cuvanje tacaka
+# points = []
 
 # Funkcija za formiranje markera u RVIZ-u
 def make_marker(points):
@@ -70,7 +65,7 @@ def split_and_merge(points, selected_algorithm, threshold_split = 0.1, threshold
     if selected_algorithm == 'rec':
         line_parameters_with_points = split_rec(points, threshold_split)
     else: 
-        line_parameters_with_points = split_iter(points, threshold_split)
+        line_parameters_with_points = split_iter(points, 3*threshold_split)
 
     # Merge deo 
     merge_result, none_merged = merge(line_parameters_with_points, threshold_merge)
@@ -287,38 +282,28 @@ def fit_line(points, selected_algorithm):
     return [r, alpha]
 
 # Funkcija za citanje podataka sa lidara
+# Callback funkcija preko koje se pokrece algoritam (S&Mr ili S&Mi)
 def lidar_callback(lidar_data):
 
-    global points, started_algorithm
+    global pub_marker, print_lines
 
-    if started_algorithm == False:
+    points = []
 
-        points = []
+    for i in range(len(lidar_data.ranges)):
 
-        for i in range(len(lidar_data.ranges)):
+        theta = lidar_data.angle_min + i*lidar_data.angle_increment
 
-            theta = lidar_data.angle_min + i*lidar_data.angle_increment
+        if theta > 2*pi :
+            theta = 2*pi
 
-            if theta > 2*pi :
-                theta = 2*pi
+        rho = lidar_data.ranges[i]
 
-            rho = lidar_data.ranges[i] if lidar_data.ranges[i] != math.inf else 3.5
-
+        if rho != math.inf:
             x = rho*math.cos(theta)
             y = rho*math.sin(theta)
             points.append([x, y, rho, theta])
-    
-# Callback funkcija preko koje se u odredjenom trenutku 
-# pokrece odredjeni algoritam (S&Mr ili S&Mi)
-def algorithm_callback(data):
 
-    global points, started_algorithm
-
-    selected_algorithm = data.data
-
-    if ((selected_algorithm in ['rec','iter']) and (points != []) and (started_algorithm == False)):
-
-        started_algorithm = True
+    if ((selected_algorithm in ['rec','iter']) and (points != [])):
 
         start = time.time()
 
@@ -328,28 +313,79 @@ def algorithm_callback(data):
 
         time_diff = end-start
 
-        started_algorithm = False
+        if print_lines == True:
+            for line in line_parameters:
+                print("r = {:.5f}, alpha = {:.5f}".format(line[0], line[1]))
 
-        print('\nParametri detektovanih linija su:')
+            print('Vreme izvrsavanja ' + ('rekurzivnog' if selected_algorithm == 'rec' else 'iterativnog') + \
+                ' Split and Merge algoritma je {:.5f}'.format(time_diff) + 's')
 
-        for line in line_parameters:
-            print("r = {:.5f}, alpha = {:.5f}".format(line[0], line[1]))
-
-        print('Vreme izvrsavanja ' + ('rekurzivnog' if selected_algorithm == 'rec' else 'iterativnog') + \
-            ' Split and Merge algoritma je ' + str(time_diff) + ' s')
+            print('-------------------------------------------------')
 
         marker = make_marker(marker_points)
-        pub_rviz.publish(marker)
+        pub_marker.publish(marker)
 
-# Funkcija za subscribe-ovanje na sve potrebne topic-e 
-def listener():
-    rospy.Subscriber('scan', LaserScan, lidar_callback)
-    rospy.Subscriber('alg_select', String, algorithm_callback)
-    rospy.spin()
+def move_robot(linear_vel, angular_vel):
+
+    global pub_velocities, vel
+
+    vel.linear.x = linear_vel
+    vel.angular.z = angular_vel
+
+    pub_velocities.publish(vel)
+
+    return 
 
 # main program za pokretanje svih gore navedenih funkcionalnosti
 if __name__ == '__main__':
-    try:
-        listener()
-    except rospy.ROSInterruptException:
-        pass
+
+    rospy.init_node('ekstrkacija_linija')
+    vel = Twist()
+
+    selected_algorithm = 'iter'
+
+    pub_marker = rospy.Publisher('visualization_marker', Marker, queue_size=0)
+    pub_velocities = rospy.Publisher('cmd_vel', Twist, queue_size = 3)
+    rospy.Subscriber('scan', LaserScan, lidar_callback)
+
+    print_lines = False
+
+    while True:
+        # exit - za izlazak iz programa
+        # print - da se u tom trenutku ispisu parametri linija u terminalu
+        # lin_vel ang_vel - par brzina linearne i ugaone
+        # alg - izabrani algoritam
+        print('\nIzberite komandu ( exit / print / alg / lin_vel ang_vel ): ')
+
+        inputs = raw_input()
+
+        if inputs == 'exit':
+            break
+
+        elif inputs == 'print':
+
+            print_lines = True
+            continue
+
+        elif inputs in ['rec', 'iter']:
+
+            selected_algorithm = inputs
+            print_lines = True
+            continue
+
+        else:
+
+            print_lines = False
+
+            try:
+
+                linear_vel, angular_vel = inputs.split(' ')
+                linear_vel = float(linear_vel)
+                angular_vel = float(angular_vel)
+
+            except:
+
+                print('Pokusajte ponovo!')
+                continue
+
+            move_robot(linear_vel, angular_vel)
