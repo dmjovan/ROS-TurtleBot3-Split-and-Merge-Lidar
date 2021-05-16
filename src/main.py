@@ -14,20 +14,28 @@ from geometry_msgs.msg import Twist
 from sensor_msgs.msg import LaserScan
 from visualization_msgs.msg import Marker
 
-# # Promenljiva za cuvanje tacaka
-# points = []
+rospy.init_node('ekstrakcija_linija', anonymous=False)
+
+vel = Twist()
+pub_velocities = rospy.Publisher('cmd_vel', Twist, queue_size = 1)
+
+pub_marker = rospy.Publisher('visualization_marker', Marker, queue_size=0)
+
+# Promenljiva za cuvanje tacaka
+selected_algorithm = None
 
 # Funkcija za formiranje markera u RVIZ-u
 def make_marker(points):
     marker = Marker()
-    marker.header.frame_id = "/base_link"
-    marker.type = marker.LINE_STRIP
-    marker.action = marker.MODIFY
+    marker.header.frame_id = "base_link"
+    marker.ns = "linije"
+    marker.type = marker.LINE_LIST
+    marker.action = marker.ADD
+    
+    marker.lifetime = rospy.Duration()
 
     # marker scale
-    marker.scale.x = 0.1
-    marker.scale.y = 0.01
-    marker.scale.z = 0.01
+    marker.scale.x = 0.2
 
     # marker color
     marker.color.a = 1.0
@@ -48,24 +56,26 @@ def make_marker(points):
 
     # marker line points
     marker.points = []
-    # add points to show in RVIZ
+
+    # points za RVIZ
     for i in range(len(points)):
         p = Point()
         p.x, p.y, p.z = points[i][0], points[i][1], 0
         marker.points.append(p)
+
     return marker
 
 # Funkcija za rekurzivni/iterativni Split and Merge algoritam
-def split_and_merge(points, selected_algorithm, threshold_split = 0.1, threshold_merge = 0.1):
+def split_and_merge(points, selected_algorithm, threshold_split = 0.5, threshold_merge = 0.2):
 
     result = []
     marker_points = []
 
     # Split deo 
     if selected_algorithm == 'rec':
-        line_parameters_with_points = split_rec(points, threshold_split)
+        line_parameters_with_points = split_rec(points, threshold_split = 0.05)
     else: 
-        line_parameters_with_points = split_iter(points, 3*threshold_split)
+        line_parameters_with_points = split_iter(points, threshold_split = 0.5)
 
     # Merge deo 
     merge_result, none_merged = merge(line_parameters_with_points, threshold_merge)
@@ -82,7 +92,7 @@ def split_and_merge(points, selected_algorithm, threshold_split = 0.1, threshold
 
 # Funkcija za merge-ovanje tacaka koje potencijalno pripadaju
 # jednoj istoj liniji 
-def merge(line_parameters_with_points, threshold_merge, r_tolerancy = 0.1, abs_angle_tolerancy = 3*pi/180):
+def merge(line_parameters_with_points, threshold_merge, r_tolerancy = 0.2, abs_angle_tolerancy = 5*pi/180):
 
     result = []
 
@@ -111,7 +121,8 @@ def merge(line_parameters_with_points, threshold_merge, r_tolerancy = 0.1, abs_a
         alpha2 = line_parameters_with_points[i][1] 
         points_2 = line_parameters_with_points[i][2]
 
-        colinearity = (np.abs(alpha1 - alpha2) <= abs_angle_tolerancy)*(np.abs(r1-r2) <= r_tolerancy)
+        # colinearity = (np.abs(alpha1 - alpha2) <= abs_angle_tolerancy)*(np.abs(r1-r2) <= r_tolerancy)
+        colinearity = (np.abs(alpha1 - alpha2) <= abs_angle_tolerancy)
 
         # Provera kolineranosti 
         if colinearity == True:
@@ -123,8 +134,8 @@ def merge(line_parameters_with_points, threshold_merge, r_tolerancy = 0.1, abs_a
 
             # Pronalazenje najudaljenije tacke 
 
-            _, max_distance_1 = find_max_distant_point(points_1, r_avg, alpha_avg)
-            _, max_distance_2 = find_max_distant_point(points_2, r_avg, alpha_avg)
+            _, max_distance_1 = find_most_distant_point(points_1, r_avg, alpha_avg)
+            _, max_distance_2 = find_most_distant_point(points_2, r_avg, alpha_avg)
 
             # Ukoliko su dve linije bliske jedna drugoj, merge-uju se
             if max(max_distance_1, max_distance_2) <= threshold_merge:
@@ -166,7 +177,7 @@ def split_iter(points, threshold_split):
         [r, alpha] = fit_line(points,'iter')
 
         # Pronalazenje najudaljenije tacke 
-        most_distant_point_index, max_distance = find_max_distant_point(points, r, alpha)
+        most_distant_point_index, max_distance = find_most_distant_point(points, r, alpha)
 
         # Ponovno splitovanje
         if (max_distance > threshold_split) and (most_distant_point_index not in [0, num_points-1]):
@@ -195,13 +206,13 @@ def split_rec(points, threshold_split):
     [r, alpha] = fit_line(points,'rec')
 
     # Pronalazenje najudaljenije tacke 
-    most_distant_point_index, max_distance = find_max_distant_point(points, r, alpha)
+    most_distant_point_index, max_distance = find_most_distant_point(points, r, alpha)
 
     # Ponovno splitovanje
     if (max_distance > threshold_split) and (most_distant_point_index not in [0, num_points-1]):
 
         left_points = points[0:most_distant_point_index] 
-        right_points = points[most_distant_point_index:]
+        right_points = points[most_distant_point_index-1:]
 
         if(left_points):
             left = split_rec(left_points, threshold_split)
@@ -220,7 +231,7 @@ def split_rec(points, threshold_split):
 
 # Funkcija za pronalazenje najudaljenije tacke od trenutne
 # fitovane linije
-def find_max_distant_point(points, r, alpha):
+def find_most_distant_point(points, r, alpha):
 
     if alpha < 0:
         alpha = 2*pi + alpha 
@@ -245,7 +256,7 @@ def find_max_distant_point(points, r, alpha):
     # print(num_points)
 
     # Pronalazenje najudaljenije tacke 
-    max_distance = -1
+    max_distance = 0
 
     for i in range(num_points):
         x0 = points[i][0]
@@ -282,10 +293,9 @@ def fit_line(points, selected_algorithm):
     return [r, alpha]
 
 # Funkcija za citanje podataka sa lidara
-# Callback funkcija preko koje se pokrece algoritam (S&Mr ili S&Mi)
 def lidar_callback(lidar_data):
 
-    global pub_marker, print_lines
+    global selected_algorithm
 
     points = []
 
@@ -296,14 +306,14 @@ def lidar_callback(lidar_data):
         if theta > 2*pi :
             theta = 2*pi
 
-        rho = lidar_data.ranges[i]
+        rho = lidar_data.ranges[i] 
 
         if rho != math.inf:
             x = rho*math.cos(theta)
             y = rho*math.sin(theta)
             points.append([x, y, rho, theta])
 
-    if ((selected_algorithm in ['rec','iter']) and (points != [])):
+    if selected_algorithm in ['rec', 'iter']:
 
         start = time.time()
 
@@ -313,18 +323,22 @@ def lidar_callback(lidar_data):
 
         time_diff = end-start
 
-        if print_lines == True:
-            for line in line_parameters:
-                print("r = {:.5f}, alpha = {:.5f}".format(line[0], line[1]))
+        started_algorithm = False
 
-            print('Vreme izvrsavanja ' + ('rekurzivnog' if selected_algorithm == 'rec' else 'iterativnog') + \
-                ' Split and Merge algoritma je {:.5f}'.format(time_diff) + 's')
+        print('\nParametri detektovanih linija su:')
 
-            print('-------------------------------------------------')
+        for line in line_parameters:
+            print("r = {:.5f} m, alpha = {:.5f} deg".format(line[0], 180/pi*line[1]))
+
+        print('Vreme izvrsavanja ' + ('rekurzivnog' if selected_algorithm == 'rec' else 'iterativnog') + \
+            ' Split and Merge algoritma je {:.5f}'.format(time_diff) + 's')
+
+        print('-----------------------------------------')
 
         marker = make_marker(marker_points)
         pub_marker.publish(marker)
 
+# Funkcija za pomeranje robota
 def move_robot(linear_vel, angular_vel):
 
     global pub_velocities, vel
@@ -334,58 +348,42 @@ def move_robot(linear_vel, angular_vel):
 
     pub_velocities.publish(vel)
 
-    return 
+    return         
+
+
+# Callback funkcija preko koje se u odredjenom trenutku 
+# pokrece odredjeni algoritam (S&Mr ili S&Mi)
+def callback(data):
+
+    global selected_algorithm
+
+    if data.data in ['rec','iter']:
+        selected_algorithm = data.data
+
+    else:
+
+        try:
+            inputs = data.data
+            linear_vel, angular_vel = inputs.split(' ')
+            linear_vel = float(linear_vel)
+            angular_vel = float(angular_vel)
+
+            move_robot(linear_vel, angular_vel)
+
+        except:
+            pass
+
+
+# Funkcija za subscribe-ovanje na sve potrebne topic-e 
+def listener():
+
+    rospy.Subscriber('scan', LaserScan, lidar_callback)
+    rospy.Subscriber('alg_control', String, callback)
+    rospy.spin()
 
 # main program za pokretanje svih gore navedenih funkcionalnosti
 if __name__ == '__main__':
-
-    rospy.init_node('ekstrkacija_linija')
-    vel = Twist()
-
-    selected_algorithm = 'iter'
-
-    pub_marker = rospy.Publisher('visualization_marker', Marker, queue_size=0)
-    pub_velocities = rospy.Publisher('cmd_vel', Twist, queue_size = 3)
-    rospy.Subscriber('scan', LaserScan, lidar_callback)
-
-    print_lines = False
-
-    while True:
-        # exit - za izlazak iz programa
-        # print - da se u tom trenutku ispisu parametri linija u terminalu
-        # lin_vel ang_vel - par brzina linearne i ugaone
-        # alg - izabrani algoritam
-        print('\nIzberite komandu ( exit / print / alg / lin_vel ang_vel ): ')
-
-        inputs = raw_input()
-
-        if inputs == 'exit':
-            break
-
-        elif inputs == 'print':
-
-            print_lines = True
-            continue
-
-        elif inputs in ['rec', 'iter']:
-
-            selected_algorithm = inputs
-            print_lines = True
-            continue
-
-        else:
-
-            print_lines = False
-
-            try:
-
-                linear_vel, angular_vel = inputs.split(' ')
-                linear_vel = float(linear_vel)
-                angular_vel = float(angular_vel)
-
-            except:
-
-                print('Pokusajte ponovo!')
-                continue
-
-            move_robot(linear_vel, angular_vel)
+    try:
+        listener()
+    except rospy.ROSInterruptException:
+        pass
