@@ -176,14 +176,23 @@ def split_iter(points, threshold_split):
         # Fitovanje linije na celom trenutnom setu tacaka
         [r, alpha] = fit_line(points,'iter')
 
+        if num_points <= 2:
+            line_parameters_with_points.append([r, alpha, points])
+
+            if not rest_of_points:
+                break
+            else:     
+                points = rest_of_points.pop()
+                continue
+
         # Pronalazenje najudaljenije tacke 
         most_distant_point_index, max_distance = find_most_distant_point(points, r, alpha)
 
         # Ponovno splitovanje
         if (max_distance > threshold_split) and (most_distant_point_index not in [0, num_points-1]):
 
-            rest_of_points.append(points[most_distant_point_index-1:])
-            points = points[0:most_distant_point_index] 
+            rest_of_points.append(points[most_distant_point_index:])
+            points = points[0:most_distant_point_index+1] 
 
         else:
             line_parameters_with_points.append([r, alpha, points])
@@ -191,6 +200,7 @@ def split_iter(points, threshold_split):
                 break
             else:     
                 points = rest_of_points.pop()
+                continue
 
     return line_parameters_with_points
 
@@ -205,14 +215,18 @@ def split_rec(points, threshold_split):
     # Fitovanje linije na celom trenutnom setu tacaka
     [r, alpha] = fit_line(points,'rec')
 
+    if num_points <= 2:
+        line_parameters_with_points.append([r, alpha, points])
+        return line_parameters_with_points
+
     # Pronalazenje najudaljenije tacke 
     most_distant_point_index, max_distance = find_most_distant_point(points, r, alpha)
 
     # Ponovno splitovanje
-    if (max_distance > threshold_split) and (most_distant_point_index not in [0, num_points-1]):
+    if ((max_distance > threshold_split) and (most_distant_point_index not in [0, num_points-1])):
 
-        left_points = points[0:most_distant_point_index] 
-        right_points = points[most_distant_point_index-1:]
+        left_points = points[0:most_distant_point_index+1] 
+        right_points = points[most_distant_point_index:]
 
         if(left_points):
             left = split_rec(left_points, threshold_split)
@@ -367,6 +381,8 @@ def callback(data):
             linear_vel, angular_vel = inputs.split(' ')
             linear_vel = float(linear_vel)
             angular_vel = float(angular_vel)
+
+            selected_algorithm = None
 
             move_robot(linear_vel, angular_vel)
 
