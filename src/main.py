@@ -29,13 +29,7 @@ def make_marker(points, selected_algorithm):
     marker = Marker()
     marker.header.frame_id = "base_link"
     marker.ns = "linije"
-
-    if selected_algorithm == 'rec':
-        # za rekurzivni algoritam line strip bolje izgleda
-        marker.type = marker.LINE_STRIP 
-    else:
-        # iterativni algoritam sadrzi zajednicke tacke izmedju segmenata, pa je line list bolje
-        marker.type = marker.LINE_LIST 
+    marker.type = marker.LINE_LIST 
     marker.action = marker.ADD
     
     marker.lifetime = rospy.Duration()
@@ -78,7 +72,7 @@ def split_and_merge(points, selected_algorithm, threshold_split = 0.2, threshold
     marker_points = []
 
     # Split deo 
-    if selected_algorithm == 'rec':
+    if selected_algorithm in ['rec', 'rec+']:
         line_parameters_with_points = split_rec(points, threshold_split)
     else: 
         line_parameters_with_points = split_iter(points, threshold_split)
@@ -86,13 +80,16 @@ def split_and_merge(points, selected_algorithm, threshold_split = 0.2, threshold
     num_segments = len(line_parameters_with_points)
 
     # Merge deo 
+
     merge_result, none_merged = merge(line_parameters_with_points, threshold_merge)
 
-    cnt = 1
+    if selected_algorithm == 'rec+':
+        
+        cnt = 1
 
-    while ((none_merged != False) and (cnt < num_segments//2)):
-        merge_result, none_merged = merge(merge_result, threshold_merge)
-        cnt += 1
+        while ((none_merged != False) and (cnt < num_segments//2)):
+            merge_result, none_merged = merge(merge_result, threshold_merge)
+            cnt += 1
     
     for line_segment in merge_result:
         result.append([line_segment[0], line_segment[1]])
@@ -348,7 +345,7 @@ def lidar_callback(lidar_data):
             y = rho*math.sin(theta)
             points.append([x, y, rho, theta])
 
-    if selected_algorithm in ['rec', 'iter']:
+    if selected_algorithm in ['rec', 'rec+', 'iter']:
 
         start = time.time()
 
@@ -363,7 +360,7 @@ def lidar_callback(lidar_data):
         for line in line_parameters:
             print("r = {:.5f} m, alpha = {:.5f} deg".format(line[0], 180/pi*line[1]))
 
-        print('Vreme izvrsavanja ' + ('rekurzivnog' if selected_algorithm == 'rec' else 'iterativnog') + \
+        print('Vreme izvrsavanja ' + ('rekurzivnog' if selected_algorithm in ['rec', 'rec+'] else 'iterativnog') + \
             ' Split and Merge algoritma je {:.5f}'.format(time_diff) + 's')
 
         print('-----------------------------------------')
@@ -383,14 +380,13 @@ def move_robot(linear_vel, angular_vel):
 
     return         
 
-
 # Callback funkcija preko koje se u odredjenom trenutku 
 # pokrece odredjeni algoritam (S&Mr ili S&Mi)
 def callback(data):
 
     global selected_algorithm
 
-    if data.data in ['rec','iter']:
+    if data.data in ['rec', 'rec+', 'iter']:
         selected_algorithm = data.data
 
     else:
