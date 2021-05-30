@@ -5,7 +5,7 @@
 
 # Ucitavanje potrebnih biblioteka i struktura poruka
 import rospy
-from domaci_3.srv import select, selectResponse
+from ROS_TurtleBot3_Split_and_Merge_Lidar.srv import select, selectResponse
 from std_msgs.msg import String
 
 # Inicijalizacija globalnog publisher-a na topic /alg_select
